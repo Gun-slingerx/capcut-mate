@@ -152,7 +152,6 @@ def test_add_video_to_draft_uses_url_when_flag_on(draft_ctx, enable_remote_url):
     assert segment_info.end == 1_000_000
     assert actual_duration == 1_000_000
 
-
 def test_add_audio_to_draft_uses_url_when_flag_on(draft_ctx, enable_remote_url):
     """开启开关时，音频素材 path 应为原始 URL，且不调用 download。"""
     segment = MagicMock()

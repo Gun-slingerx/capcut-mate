@@ -52,7 +52,10 @@ def create_draft(width: int, height: int) -> str:
         script.save_path = draft_content_path
         script.save()
         
-        # 添加空的主轨道（仅当没有主轨道时添加）
+        # 模板自带空主轨；由可编辑轨道取代，避免保存出两条同名空主轨。
+        script.imported_tracks = [track for track in script.imported_tracks
+                                  if not (track.name == "main_track" and
+                                          track.track_type == draft.TrackType.video and not track.segments)]
         main_track_name = "main_track"
         script.add_track(track_type=draft.TrackType.video, track_name=main_track_name, relative_index=0)
         logger.info(f"Added empty main track: {main_track_name}")

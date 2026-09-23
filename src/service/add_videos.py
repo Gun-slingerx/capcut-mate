@@ -39,7 +39,8 @@ def add_videos(
     scale_x: float = 1.0, 
     scale_y: float = 1.0, 
     transform_x: int = 0, 
-    transform_y: int = 0
+    transform_y: int = 0,
+    use_main_track: bool = False,
 ) -> Tuple[str, str, List[str], List[str], List[SegmentInfo]]:
     """
     添加视频到剪映草稿的业务逻辑（同步版本，兼容旧代码）
@@ -95,6 +96,7 @@ def add_videos(
         scale_y=scale_y,
         transform_x=transform_x,
         transform_y=transform_y,
+        use_main_track=use_main_track,
         prepared_videos=None,
     )
 
@@ -132,7 +134,13 @@ def _prepare_videos_local_files(draft_url: str, video_infos: str) -> List[Dict[s
     for video in videos:
         video["original_start"] = video["start"]
         video["original_end"] = video["end"]
-        video["local_video_path"] = download(url=video["video_url"], save_dir=draft_video_dir)
+        local_path = video.get("local_video_path")
+        if local_path:
+            if not os.path.isfile(local_path):
+                raise CustomException(CustomError.VIDEO_ADD_FAILED, f"Missing local file: {local_path}")
+            video["local_video_path"] = os.path.abspath(local_path)
+        else:
+            video["local_video_path"] = download(url=video["video_url"], save_dir=draft_video_dir)
 
     return videos
 
@@ -146,7 +154,8 @@ async def add_videos_async(
     scale_y: float = 1.0, 
     transform_x: int = 0, 
     transform_y: int = 0,
-    lock_timeout: float = 30.0
+    lock_timeout: float = 30.0,
+    use_main_track: bool = False,
 ) -> Tuple[str, str, List[str], List[str], List[SegmentInfo]]:
     """
     添加视频到剪映草稿的异步版本（带并发锁保护）
@@ -222,6 +231,7 @@ async def add_videos_async(
             scale_y=scale_y,
             transform_x=transform_x,
             transform_y=transform_y,
+            use_main_track=use_main_track,
             prepared_videos=prepared_videos,
         )
     finally:
@@ -239,6 +249,7 @@ def _add_videos_internal(
     transform_x: int = 0,
     transform_y: int = 0,
     prepared_videos: Optional[List[Dict[str, Any]]] = None,
+    use_main_track: bool = False,
 ) -> Tuple[str, str, List[str], List[str], List[SegmentInfo]]:
     """
     添加视频的内部处理函数（无锁，需外层控制并发）
@@ -288,9 +299,19 @@ def _add_videos_internal(
     # 4. 从缓存中获取草稿
     script: ScriptFile = DRAFT_CACHE[draft_id]
 
-    # 5. 添加视频轨道（非主轨；叠层与 add_images / add_captions / add_filters 等一致，按全局调用顺序递增 render_index）
-    track_name = f"video_track_{helper.gen_unique_id()}"
-    script.add_track_ordered(track_type=draft.TrackType.video, track_name=track_name)
+    # 主轨模式复用 create_draft 创建的空轨；旧调用仍使用独立叠加轨。
+    if use_main_track:
+        track_name = "main_track"
+        main_track = script.tracks.get(track_name)
+        if main_track is None or main_track.track_type != draft.TrackType.video:
+            raise ValueError("草稿中没有可用的视频主轨道")
+        if main_track.segments:
+            raise ValueError("视频主轨道已有片段，不能重复写入")
+        if not videos or videos[0]["start"] != 0:
+            raise ValueError("主轨道的第一个视频必须从 0 开始")
+    else:
+        track_name = f"video_track_{helper.gen_unique_id()}"
+        script.add_track_ordered(track_type=draft.TrackType.video, track_name=track_name)
 
     # 6. 遍历视频信息，添加视频到草稿中的指定轨道，收集片段 ID 与片段信息
     segment_ids = []
@@ -457,16 +478,15 @@ def add_video_to_draft(
         
         # 5. 计算在时间轴上的显示时长（source duration）
         display_duration = video['end'] - video['start']
-        
         # 5.5 计算变速（如果提供了场景时间线）
-        speed = 1.0
+        source_duration = min(video_material.duration, display_duration)
+        speed = source_duration / display_duration
         actual_duration = display_duration  # 默认实际时长等于显示时长
         if scene_timeline:
             scene_duration = scene_timeline['end'] - scene_timeline['start']
             if scene_duration > 0:
-                # speed = 时间轴时长 / 场景时长
-                # 例如：时间轴2秒，场景1秒，则speed=2（2倍速）
-                speed = display_duration / scene_duration
+                # 使用素材实际可读时长，避免媒体探测与时间轴相差几毫秒时产生间隙。
+                speed = source_duration / scene_duration
                 actual_duration = scene_duration  # 实际播放时长为场景时长
                 logger.info(f"Video speed calculated: {speed}x (display_duration={display_duration}, scene_duration={scene_duration})")
         
@@ -476,7 +496,7 @@ def add_video_to_draft(
         video_segment = draft.VideoSegment(
             material=video_material, 
             target_timerange=trange(start=video['start'], duration=display_duration),
-            source_timerange=trange(start=0, duration=min(video_material.duration, display_duration)),
+            source_timerange=trange(start=0, duration=source_duration),
             speed=speed,  # 使用计算出的速度
             volume=raw_volume,
             clip_settings=clip_settings
@@ -609,7 +629,6 @@ def parse_video_data(json_str: str) -> List[Dict[str, Any]]:
             duration = int(duration)
         else:
             duration = end - start
-        
         # 创建处理后的对象，设置默认值
         processed_item = {
             "video_url": item["video_url"],
@@ -623,7 +642,8 @@ def parse_video_data(json_str: str) -> List[Dict[str, Any]]:
             "transition_duration": item.get("transition_duration", None),  # 默认用转场类型自身时长
             "volume": 1.0 if item.get("volume") is None else item.get("volume"),
         }
-        
+        if item.get("local_video_path"):
+            processed_item["local_video_path"] = item["local_video_path"]
         # 验证数值范围：用户传入范围 [0, 10]，超范围时给默认值
         if processed_item["volume"] < 0 or processed_item["volume"] > 10:
             logger.warning(f"Volume {processed_item['volume']} out of range [0, 10], using default 1.0")

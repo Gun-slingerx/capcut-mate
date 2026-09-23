@@ -109,6 +109,7 @@ async def add_videos(avr: AddVideosRequest) -> AddVideosResponse:
         scale_y=avr.scale_y,
         transform_x=avr.transform_x,
         transform_y=avr.transform_y,
+        use_main_track=avr.use_main_track,
         lock_timeout=30.0  # 30 秒超时
     )
 
