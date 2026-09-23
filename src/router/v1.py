@@ -9,6 +9,8 @@ from src.schemas.add_captions import AddCaptionsResponse
 from src.schemas.add_effects import AddEffectsResponse
 from src.schemas.add_filters import AddFiltersResponse
 from src.schemas.add_masks import AddMasksResponse
+from src.schemas.add_mask_keyframes import AddMaskKeyframesResponse
+from src.schemas.add_beauty import AddBeautyResponse
 from src.schemas.add_text_style import AddTextStyleResponse
 from src.schemas.get_text_animations import GetTextAnimationsResponse
 from src.schemas.get_image_animations import GetImageAnimationsResponse
@@ -27,6 +29,8 @@ from src.schemas.add_captions import AddCaptionsRequest, AddCaptionsResponse
 from src.schemas.add_effects import AddEffectsRequest, AddEffectsResponse
 from src.schemas.add_filters import AddFiltersRequest, AddFiltersResponse
 from src.schemas.add_masks import AddMasksRequest, AddMasksResponse
+from src.schemas.add_mask_keyframes import AddMaskKeyframesRequest, AddMaskKeyframesResponse
+from src.schemas.add_beauty import AddBeautyRequest, AddBeautyResponse
 from src.schemas.add_text_style import AddTextStyleRequest, AddTextStyleResponse
 from src.schemas.get_text_animations import GetTextAnimationsRequest, GetTextAnimationsResponse
 from src.schemas.get_image_animations import GetImageAnimationsRequest, GetImageAnimationsResponse
@@ -326,6 +330,51 @@ async def add_masks(amr: AddMasksRequest) -> AddMasksResponse:
         masks_added=masks_added,
         affected_segments=affected_segments,
         mask_ids=mask_ids
+    )
+
+@router.post(path="/add_mask_keyframes", response_model=AddMaskKeyframesResponse)
+async def add_mask_keyframes(amkr: AddMaskKeyframesRequest) -> AddMaskKeyframesResponse:
+    """
+    向已有蒙版的视频片段添加蒙版关键帧（位置 / 大小 / 羽化 / 旋转）
+    """
+    draft_url, keyframes_added, affected_segments = await service.add_mask_keyframes_async(
+        draft_url=amkr.draft_url,
+        keyframes=[item.model_dump() for item in amkr.keyframes],
+        lock_timeout=30.0,
+    )
+
+    return AddMaskKeyframesResponse(
+        draft_url=draft_url,
+        keyframes_added=keyframes_added,
+        affected_segments=affected_segments,
+    )
+
+@router.post(path="/add_beauty", response_model=AddBeautyResponse)
+async def add_beauty(abr: AddBeautyRequest) -> AddBeautyResponse:
+    """
+    向剪映草稿的视频片段添加美颜 (匀肤 / 丰盈 / 磨皮 / 祛法令纹 / 亮眼 / 祛黑眼圈 / 美白 / 白牙 / 肤色)
+    """
+    draft_url, affected_segments, figure_ids = await service.add_beauty_async(
+        draft_url=abr.draft_url,
+        segment_ids=abr.segment_ids,
+        beauty_infos=[item.model_dump() for item in abr.beauty_infos],
+        lock_timeout=30.0,
+        匀肤=abr.匀肤,
+        丰盈=abr.丰盈,
+        磨皮=abr.磨皮,
+        祛法令纹=abr.祛法令纹,
+        亮眼=abr.亮眼,
+        祛黑眼圈=abr.祛黑眼圈,
+        美白=abr.美白,
+        白牙=abr.白牙,
+        肤色=abr.肤色,
+        肤色强度=abr.肤色强度,
+    )
+
+    return AddBeautyResponse(
+        draft_url=draft_url,
+        affected_segments=affected_segments,
+        figure_ids=figure_ids,
     )
 
 @router.post(path="/add_text_style", response_model=AddTextStyleResponse)
